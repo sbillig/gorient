@@ -108,8 +108,13 @@ func (x *Xx) readByte() byte {
 	x.read(&n)
 	return n
 }
-func (x *Xx) readInt() int32 {
+func (x *Xx) readInt32() int32 {
 	var n int32
+	x.read(&n)
+	return n
+}
+func (x *Xx) readInt64() int64 {
+	var n int64
 	x.read(&n)
 	return n
 }
@@ -119,7 +124,7 @@ func (x *Xx) beginReq(command Command) {
 func (x *Xx) beginResp() {
 	x.readByte()
 	// TODO: succ != 0 => read error
-	x.readInt()
+	x.readInt32()
 	// TODO: sess != x.sess
 }
 
@@ -175,6 +180,17 @@ func (x *Xx) close() {
 	x.conn.Close()
 }
 
+func (x *Xx) size() int64 {
+	x.beginReq(DB_SIZE)
+	x.beginResp()
+	return x.readInt64()
+}
+
+func (x *Xx) recordCount() int64 {
+	x.beginReq(DB_COUNTRECORDS)
+	x.beginResp()
+	return x.readInt64()
+}
 func main() {
 	var x Xx
 	err := x.open("localhost:2424", "temp", "admin", "admin")
@@ -185,4 +201,7 @@ func main() {
 	defer x.close()
 
 	fmt.Println(x)
+	fmt.Println("size:", x.size())
+	fmt.Println("records:", x.recordCount())
+
 }
