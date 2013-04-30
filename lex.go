@@ -145,25 +145,24 @@ func (l *lexer) backup() {
 	l.pos -= l.width
 }
 
+func emitVal(l *lexer, i itemType) stateFn {
+	l.emit(i)
+	return lexValue
+}
 func lexValue(l *lexer) stateFn {
-	rec := func (i itemType) stateFn {
-		l.emit(i)
-		return lexValue
-	}
-
 	c := l.next()
 	switch c {
-	case ',': return rec(itemComma)
-	case '[': return rec(itemStartList)
-	case ']': return rec(itemEndList)
-	case '{': return rec(itemStartMap)
-	case '}': return rec(itemEndMap)
-	case '<': return rec(itemStartSet)
-	case '>': return rec(itemEndSet)
-	case '(': return rec(itemStartDoc)
-	case ')': return rec(itemEndDoc)
-	case '@': return rec(itemAt)
-	case ':': return rec(itemColon)
+	case ',': return emitVal(l, itemComma)
+	case '[': return emitVal(l, itemStartList)
+	case ']': return emitVal(l, itemEndList)
+	case '{': return emitVal(l, itemStartMap)
+	case '}': return emitVal(l, itemEndMap)
+	case '<': return emitVal(l, itemStartSet)
+	case '>': return emitVal(l, itemEndSet)
+	case '(': return emitVal(l, itemStartDoc)
+	case ')': return emitVal(l, itemEndDoc)
+	case '@': return emitVal(l, itemAt)
+	case ':': return emitVal(l, itemColon)
 	case '"':
 		return lexString
 	case '_':
@@ -186,27 +185,26 @@ func lexValue(l *lexer) stateFn {
 	}
 	return nil
 }
-
+func emitNum(l *lexer, i itemType) stateFn {
+	l.backup()
+	l.emit(i)
+	l.eat(1)
+	return lexValue
+}
 func lexNumber(l *lexer) stateFn {
 	r := l.next()
 	for unicode.IsDigit(r) || r == '.' {
 		r = l.next()
 	}
-	rec := func(t itemType) stateFn {
-		l.backup()
-		l.emit(t)
-		l.eat(1)
-		return lexValue
-	}
 	switch r {
-	case 'b': return rec(itemByte)
-	case 's': return rec(itemShort)
-	case 'l': return rec(itemLong)
-	case 'f': return rec(itemFloat)
-	case 'd': return rec(itemDouble)
-	case 'c': return rec(itemBigDecimal)
-	case 'a': return rec(itemDate)
-	case 't': return rec(itemTime)
+	case 'b': return emitNum(l, itemByte)
+	case 's': return emitNum(l, itemShort)
+	case 'l': return emitNum(l, itemLong)
+	case 'f': return emitNum(l, itemFloat)
+	case 'd': return emitNum(l, itemDouble)
+	case 'c': return emitNum(l, itemBigDecimal)
+	case 'a': return emitNum(l, itemDate)
+	case 't': return emitNum(l, itemTime)
 	default:
 		l.backup()
 		l.emit(itemInt)
