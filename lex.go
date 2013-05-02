@@ -170,7 +170,7 @@ func lexValue(l *lexer) stateFn {
 		return lexBinary
 	case '#':
 		return lexRID
-	case eof:
+	case eof, ' ':
 		l.emit(itemEndDoc)
 		return nil
 	default:
@@ -180,7 +180,7 @@ func lexValue(l *lexer) stateFn {
 		case unicode.IsLetter(c):
 			return lexSymbol
 		default:
-			fmt.Println("unrec:", string(c))
+			fmt.Printf("unrecognized lexeme start character: %s (%v)\n", string(c), c)
 		}
 	}
 	return nil
