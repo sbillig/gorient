@@ -1,4 +1,4 @@
-package main
+package gorient
 
 import (
 	"fmt"
@@ -37,7 +37,7 @@ const (
 	POSITIONS_LOWER                        = 37
 	RECORD_CLEAN_OUT                       = 38
 	POSITIONS_FLOOR                        = 39
-	COUNT                                  = 40 // REQUEST_DATACLUSTER_COUNT
+	COUNT                                  = 40 // use DATACLUSTER_COUNT
 	COMMAND                                = 41
 	POSITIONS_CEILING                      = 42
 	TX_COMMIT                              = 60
@@ -191,17 +191,53 @@ func (x *Xx) recordCount() int64 {
 	x.beginResp()
 	return x.readInt64()
 }
-func main() {
-	var x Xx
-	err := x.open("localhost:2424", "temp", "admin", "admin")
-	if err != nil {
-		fmt.Println("err:",err)
-		return
+func (x *Xx) loadRecord(cluster int16, position int64) []interface{} {
+	x.beginReq(RECORD_LOAD)
+	x.write(cluster, position)
+
+	// TODO: Fetch plans
+	// See https://github.com/nuvolabase/orientdb/wiki/Fetching-Strategies
+	x.write("")
+
+	// Ignore cache, don't load tombstones (?)
+	x.write(byte(1), byte(0))
+
+
+	x.beginResp()
+	// Response: [(payload-status:byte)[(rec-content:bytes)(rec-ver:int)(rec-type:byte)]*]+
+
+	// Record data:
+	// Null record: (-2:short)
+	// RID: (-3:short)(cluster:short)(position:long)
+	// Record: (0:short)(rectype:byte)(clus:short)(pos:long)(ver:int)(content:bytes)
+
+	out := make([]interface{}, 0, 4)
+	for {
+		stat := x.readByte()
+		if stat == 0 {
+			// No more records
+			break
+		}
+		if stat == 2 {
+			// Next record is a cache pre-fetch, to be loaded
+			// into local cache; not part of the current request.
+			// This isn't used as of 1.4.0 snapshot 15 (supposedly)
+			panic("Cache pre-fetching is not yet supported")
+		}
+		rcontent := x.readBytes()
+		x.readInt32() // TODO: record type with version field
+		rtype := x.readByte()
+		switch rtype {
+		case 'b':
+			out = append(out, rcontent)
+		case 'f':
+			out = append(out, string(rcontent))
+		case 'd':
+			doc := parse(string(rcontent))
+			out = append(out, doc)
+		default:
+			panic(fmt.Sprintf("Unrecognized record type: %v",rtype))
+		}
 	}
-	defer x.close()
-
-	fmt.Println(x)
-	fmt.Println("size:", x.size())
-	fmt.Println("records:", x.recordCount())
-
+	return out
 }
