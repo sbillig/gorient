@@ -17,6 +17,10 @@ func TestX(t *testing.T) {
 	fmt.Println(x)
 	fmt.Println("size:", x.size())
 	fmt.Println("records:", x.recordCount())
-	fmt.Println("load:",x.loadRecord(91, 0))
 
+	rs := x.loadRecord(Rid{13, 0}, "*:-1")
+	fmt.Println("recs:",rs.Records)
+	fmt.Println("pres:",rs.Prefetch)
+
+	fmt.Println("load one:",x.loadRecord(Rid{13,0}, ""))
 }

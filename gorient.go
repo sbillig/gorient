@@ -78,6 +78,7 @@ type Xx struct {
 func (x *Xx) read(data interface{}) {
 	binary.Read(x.conn, binary.BigEndian, data)
 }
+
 func (x *Xx) write(data ...interface{}) {
 	for _, d := range data {
 		switch d.(type) {
@@ -108,6 +109,11 @@ func (x *Xx) readByte() byte {
 	x.read(&n)
 	return n
 }
+func (x *Xx) readInt16() int16 {
+	var n int16
+	x.read(&n)
+	return n
+}
 func (x *Xx) readInt32() int32 {
 	var n int32
 	x.read(&n)
@@ -117,6 +123,9 @@ func (x *Xx) readInt64() int64 {
 	var n int64
 	x.read(&n)
 	return n
+}
+func (x *Xx) readRid() Rid {
+	return Rid{x.readInt16(), x.readInt64()}
 }
 func (x *Xx) beginReq(command Command) {
 	x.write(command, x.sess)
@@ -191,13 +200,13 @@ func (x *Xx) recordCount() int64 {
 	x.beginResp()
 	return x.readInt64()
 }
-func (x *Xx) loadRecord(cluster int16, position int64) []interface{} {
+func (x *Xx) loadRecord(rid Rid, plan string) *ResultSet {
 	x.beginReq(RECORD_LOAD)
-	x.write(cluster, position)
+	x.write(rid)
 
 	// TODO: Fetch plans
 	// See https://github.com/nuvolabase/orientdb/wiki/Fetching-Strategies
-	x.write("")
+	x.write(plan)
 
 	// Ignore cache, don't load tombstones (?)
 	x.write(byte(1), byte(0))
@@ -206,38 +215,56 @@ func (x *Xx) loadRecord(cluster int16, position int64) []interface{} {
 	x.beginResp()
 	// Response: [(payload-status:byte)[(rec-content:bytes)(rec-ver:int)(rec-type:byte)]*]+
 
-	// Record data:
-	// Null record: (-2:short)
-	// RID: (-3:short)(cluster:short)(position:long)
-	// Record: (0:short)(rectype:byte)(clus:short)(pos:long)(ver:int)(content:bytes)
+	recs := make([]Record, 0, 4)
+	var pres map[Rid]Record
 
-	out := make([]interface{}, 0, 4)
+RecordLoop:
 	for {
-		stat := x.readByte()
-		if stat == 0 {
+		switch x.readByte() {
+		case 0:
 			// No more records
-			break
-		}
-		if stat == 2 {
+			break RecordLoop
+		case 1:
+			content := x.readBytes()
+			ver := x.readInt32()
+			rtype := x.readByte()
+
+			recs = append(recs, Record{ver, recValue(rtype, content)})
+		case 2:
+			if pres == nil {
+				pres = make(map[Rid]Record, 1)
+			}
 			// Next record is a cache pre-fetch, to be loaded
 			// into local cache; not part of the current request.
-			// This isn't used as of 1.4.0 snapshot 15 (supposedly)
-			panic("Cache pre-fetching is not yet supported")
-		}
-		rcontent := x.readBytes()
-		x.readInt32() // TODO: record type with version field
-		rtype := x.readByte()
-		switch rtype {
-		case 'b':
-			out = append(out, rcontent)
-		case 'f':
-			out = append(out, string(rcontent))
-		case 'd':
-			doc := parse(string(rcontent))
-			out = append(out, doc)
-		default:
-			panic(fmt.Sprintf("Unrecognized record type: %v",rtype))
+			// Sub record data:
+			// Null record: (-2:short)
+			// RID: (-3:short)(cluster:short)(position:long)
+			// Record: (0:short)(rectype:byte)(clus:short)(pos:long)(ver:int)(content:bytes)
+
+			switch x.readInt16() {
+			case -2:
+				fmt.Println("null record")
+			case -3:
+				rid := x.readRid()
+				fmt.Println("RID sub:",rid)
+			case 0:
+				rtype := x.readByte()
+				rid := x.readRid()
+				ver := x.readInt32()
+				content := x.readBytes()
+
+				pres[rid] = Record{ver, recValue(rtype, content)}
+			}
 		}
 	}
-	return out
+
+	return &ResultSet{recs, pres}
+}
+
+func recValue(rtype byte, content []byte) interface{} {
+	switch rtype {
+	case 'd':     return parse(string(content))
+	case 'b','f': return content
+	}
+	panic(fmt.Sprintf("Unrecognized record type: %v",rtype))
 }

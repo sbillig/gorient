@@ -5,7 +5,7 @@ import (
 	"strconv"
 )
 
-func parse(s string) *doc {
+func parse(s string) *Document {
 	_, out := lex(s)
 
 	p := &par{items: out}
@@ -44,18 +44,6 @@ func (p *par) next() item {
 	return p.buf[p.peekCount]
 }
 
-type doc struct {
-	class string
-	fields map[string]interface{}
-}
-
-func (d *doc) String() string {
-	if len(d.class) > 0 {
-		return fmt.Sprintf("%s(%v)", d.class, d.fields)
-	}
-	return fmt.Sprintf("(%v)", d.fields)
-}
-
 func (p *par) expect(t itemType) item {
 	i := p.next()
 	if i.typ != t {
@@ -63,20 +51,20 @@ func (p *par) expect(t itemType) item {
 	}
 	return i
 }
-func parseDoc(p *par) *doc {
+func parseDoc(p *par) *Document {
 	// StartDoc has been seen
-	out := &doc{fields: make(map[string]interface{}, 8)}
+	out := &Document{Fields: make(map[string]interface{}, 8)}
 
 	f := p.expect(itemSymbol)
 	div := p.next()
 	if div.typ == itemAt {
-		out.class = f.val
+		out.Class = f.val
 		f = p.expect(itemSymbol)
 		div = p.next()
 	}
 
 	for {
-		out.fields[f.val] = parseValue(p)
+		out.Fields[f.val] = parseValue(p)
 		n := p.next()
 		if n.typ == itemEndDoc {
 			return out

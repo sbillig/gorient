@@ -24,7 +24,7 @@ func BenchmarkParse(b *testing.B) {
 
 func TestTrailingSpace(t *testing.T) {
 	s := `Person@name:"Raf",city:"TORINO",gender:"f"     `
-	d := &doc{class: "Person", fields: map[string]interface{} {
+	d := &Document{Class: "Person", Fields: map[string]interface{} {
 			"name": "Raf",
 			"city": "TORINO",
 			"gender": "f",
@@ -40,9 +40,9 @@ func TestParse(t *testing.T) {
 //
 
 	d := parse(s)
-	d1 := &doc{
-		class: "Profile",
-		fields: map[string]interface{} {
+	d1 := &Document{
+		Class: "Profile",
+		Fields: map[string]interface{} {
 			"nick": "B \"POTUS\" Obama",
 			"follows": []interface{} {},
 			"followers": []interface{} {"#10:5", "#10:6"},
@@ -50,12 +50,12 @@ func TestParse(t *testing.T) {
 			"age": int32(51),
 			"location": "#3:2",
 			"salary": float32(120.3),
-			"dog": &doc{
+			"dog": &Document{
 				"Animal",
 				map[string]interface{} {"name":"Fido"},
 			},
-			"cat": &doc{
-				fields: map[string]interface{} {"name":"Pip","age":int16(7)},
+			"cat": &Document{
+				Fields: map[string]interface{} {"name":"Pip","age":int16(7)},
 			},
 			"x": []interface{} {int32(1), int32(2)},
 		},
@@ -65,8 +65,8 @@ func TestParse(t *testing.T) {
 		t.Fail()
 	}
 
-	for k, v := range d.fields {
-		if !reflect.DeepEqual(v, d1.fields[k]) {
+	for k, v := range d.Fields {
+		if !reflect.DeepEqual(v, d1.Fields[k]) {
 			fmt.Println("failed on",k)
 			t.Fail()
 		}
