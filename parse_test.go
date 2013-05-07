@@ -34,6 +34,20 @@ func TestTrailingSpace(t *testing.T) {
 		t.Fail()
 	}
 }
+
+func TestTrailingNull(t *testing.T) {
+	s := `X@f1:"a",f2:`
+	d := &Document{Class: "X", Fields: map[string]interface{} {
+			"f1":"a",
+			"f2":nil,
+		},
+	}
+	if !reflect.DeepEqual(parse(s), d) {
+		fmt.Println(parse(s))
+		t.Fail()
+	}
+}
+
 func TestParse(t *testing.T) {
 	s := `Profile@nick:"B \"POTUS\" Obama",follows:[],followers:[#10:5,#10:6],name:"Barack",age:51,location:#3:2,salary:120.3f,dog:(Animal@name:"Fido"),cat:(name:"Pip",age:7s),x:<1,2>`
 //	s := "name:\"ORole\",id:0,defaultClusterId:3,clusterIds:[3],properties:[(name:\"mode\",type:17,offset:0,mandatory:false,notNull:false,min:,max:,linkedClass:,linkedType:,index:),(name:\"rules\",type:12,offset:1,mandatory:false,notNull:false,min:,max:,linkedClass:,linkedType:17,index:)]"

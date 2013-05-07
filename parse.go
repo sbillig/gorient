@@ -81,7 +81,7 @@ func parseDoc(p *par) *Document {
 func parseValue(p *par) interface{} {
 	n := p.next()
 	switch n.typ {
-	case itemComma:
+	case itemComma, itemEndDoc:
 		p.backup()
 		return nil
 	case itemStartMap:
