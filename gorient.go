@@ -73,6 +73,7 @@ const (
 type Xx struct {
 	conn net.Conn
 	sess int32
+	proto int16
 }
 
 func (x *Xx) read(data interface{}) {
@@ -131,10 +132,24 @@ func (x *Xx) beginReq(command Command) {
 	x.write(command, x.sess)
 }
 func (x *Xx) beginResp() {
-	x.readByte()
-	// TODO: succ != 0 => read error
-	x.readInt32()
+	err := x.readByte()
+
 	// TODO: sess != x.sess
+	x.readInt32()
+
+	if err == 1 {
+		// TODO: proper error handling
+		fmt.Println("ERROR")
+		x.readErrors()
+		panic("Transaction failed")
+	}
+
+}
+
+func (x *Xx) readErrors() {
+	for x.readByte() == 1 {
+		fmt.Println(x.readString(),	x.readString())
+	}
 }
 
 type cluster struct {
@@ -153,13 +168,18 @@ func (x *Xx) open(host, db, user, pass string) error {
 	x.conn = conn
 	x.sess = -1
 
-	var proto int16
-	x.read(&proto)
-	fmt.Println("db protocol:",proto)
-	proto = 15
+	// Server sends protocol on connect
+	x.proto = x.readInt16()
+
+	if x.proto < 13 || x.proto > 15 {
+		fmt.Println("Unrecognized protocol:",x.proto,
+			"Continuing anyway.")
+	}
+
+	fmt.Println("db protocol:",x.proto)
 
 	x.beginReq(DB_OPEN)
-	x.write("gorient", "alpha", proto, "a client id")
+	x.write("gorient", "alpha", x.proto, "a client id")
 	x.write(db, "document", user, pass)
 
 	x.beginResp()
@@ -177,10 +197,10 @@ func (x *Xx) open(host, db, user, pass string) error {
 		c.typ = x.readString()
 		x.read(&c.segId)
 	}
-	fmt.Println("clusters:",cs)
 	fmt.Println("cconfig:",x.readBytes())
-	fmt.Println("v:",x.readString())
-
+	if x.proto >= 14 {
+		fmt.Println("v:",x.readString())
+	}
 	return nil
 }
 
@@ -200,7 +220,7 @@ func (x *Xx) recordCount() int64 {
 	x.beginResp()
 	return x.readInt64()
 }
-func (x *Xx) loadRecord(rid Rid, plan string) *ResultSet {
+func (x *Xx) loadRecord(rid Rid, plan string) (Record, map[Rid]Record)  {
 	x.beginReq(RECORD_LOAD)
 	x.write(rid)
 
@@ -211,60 +231,161 @@ func (x *Xx) loadRecord(rid Rid, plan string) *ResultSet {
 	// Ignore cache, don't load tombstones (?)
 	x.write(byte(1), byte(0))
 
-
 	x.beginResp()
 	// Response: [(payload-status:byte)[(rec-content:bytes)(rec-ver:int)(rec-type:byte)]*]+
 
-	recs := make([]Record, 0, 4)
 	var pres map[Rid]Record
+	var rec Record
 
-RecordLoop:
 	for {
-		switch x.readByte() {
-		case 0:
-			// No more records
-			break RecordLoop
+		switch stat := x.readByte(); stat {
 		case 1:
 			content := x.readBytes()
 			ver := x.readInt32()
 			rtype := x.readByte()
+			rec = Record{ver, recValue(rtype, content)}
 
-			recs = append(recs, Record{ver, recValue(rtype, content)})
 		case 2:
+			// Next record is a cache pre-fetch, to be loaded
+			// into local cache; not part of the current request.
 			if pres == nil {
 				pres = make(map[Rid]Record, 1)
 			}
-			// Next record is a cache pre-fetch, to be loaded
-			// into local cache; not part of the current request.
-			// Sub record data:
-			// Null record: (-2:short)
-			// RID: (-3:short)(cluster:short)(position:long)
-			// Record: (0:short)(rectype:byte)(clus:short)(pos:long)(ver:int)(content:bytes)
+			id, r := x.readRecord()
+			pres[id] = r
 
-			switch x.readInt16() {
-			case -2:
-				fmt.Println("null record")
-			case -3:
-				rid := x.readRid()
-				fmt.Println("RID sub:",rid)
-			case 0:
-				rtype := x.readByte()
-				rid := x.readRid()
-				ver := x.readInt32()
-				content := x.readBytes()
+		case 0:
+			return rec, pres
 
-				pres[rid] = Record{ver, recValue(rtype, content)}
-			}
+		default:
+			panic(fmt.Sprintf("Unrecognized payload status: %s\n", string(stat)))
 		}
 	}
-
-	return &ResultSet{recs, pres}
+	panic("")
 }
 
+func (x *Xx) readRecord() (Rid, Record) {
+	// Null:(-2:short)
+	// RID: (-3:short)(cluster:short)(position:long)
+	// Rec:  (0:short)(rectype:byte)(clus:short)(pos:long)(ver:int)(content:bytes)
+
+	rtype := x.readInt16()
+	switch rtype {
+	case 0:
+		rtype := x.readByte()
+		rid := x.readRid()
+		ver := x.readInt32()
+		content := x.readBytes()
+		return rid, Record{ver, recValue(rtype, content)}
+	case -2:
+		// TODO
+		panic("null record")
+	case -3:
+		rid := x.readRid()
+		fmt.Println("RID sub:",rid)
+		// TODO
+		panic("RID record")
+	}
+	// TODO
+	panic(fmt.Sprintf("Unrecognized record type: %v\n", rtype))
+}
 func recValue(rtype byte, content []byte) interface{} {
 	switch rtype {
 	case 'd':     return parse(string(content))
 	case 'b','f': return content
 	}
-	panic(fmt.Sprintf("Unrecognized record type: %v",rtype))
+	panic(fmt.Sprintf("Unrecognized record format: %v",rtype))
+}
+
+
+// Execute a command string (ie. a query or script)
+//
+// class:
+//   "c" (short for "com.orientechnologies.orient.core.sql.OCommandSQL")
+//     Required for write commands.  Works for reads, but (apparently)
+//     ignores the limit field.
+//     The nodejs driver (node-orientdb) always uses this, unless a limit
+//     or fetch plan is specified (in which case is uses OSQLAsynchQuery).
+//
+//   "q" ("com.orientechnologies.orient.core.sql.query.OSQLSynchQuery")
+//     Only allows read queries (sends error and kills connection otherwise).
+//
+//   "s" ("com.orientechnologies.orient.core.command.script.OCommandScript")
+//     Don't use.  I'll probably move this one to a separate function,
+//     because it requires a language parameter (eg. "Javascript").
+//
+// mode: 's' (synchronous)
+//       'a' (asynchronous)
+//
+//  'a' streams back records one at a time
+//  's' packages records with a leading record count
+func (x *Xx) command(q, class string, mode byte, lim int, fp string) {
+
+	// NOTE: The orientdb network protocol docs seem to be wrong here.
+	//  Should be:
+	//    Request: (mode:byte)(payload-length:int)(payload)
+	//  where
+	//    payload = (class-name:string)(text:string)(limit:int)
+	//              (fetchplan:string)(serialized-params:bytes)
+	//  set limit = -1 for no limit
+	//  set params = 0:int for no params
+	//
+	//  Note that the docs suggest that fetchplan should be left out for
+	//  non-select queries. Sending an empty string (i.e. just the 0:int
+	//  string length prefix) works fine.  Haven't tried leaving it out
+	//  completely.
+
+	x.beginReq(COMMAND)
+
+	plen := 4 + len(class)
+	plen += 4 + len(q)
+	plen += 4 // limit
+	plen += 4 + len(fp)
+	plen += 4 // params (0:int for now)
+
+	x.write(mode, int32(plen), class, q, int32(2), fp, int32(0))
+
+	x.beginResp()
+
+	if mode == 's' {
+		stat := x.readByte()
+		switch stat {
+		case 'l':
+			// (c:int)[(record)]{c}
+
+			c := x.readInt32()
+			for c > 0 {
+				id, r := x.readRecord()
+				fmt.Println("lrecord",c,":",id,r)
+				c--
+			}
+		case 'r':
+			id, r := x.readRecord()
+			fmt.Println("rrecord:",id,r)
+		case 'a':
+			// (value:string/bytes)
+			fmt.Println(x.readString())
+		case 'n':
+			fmt.Println("null record")
+		}
+
+		return
+	}
+
+	for {
+		stat := x.readByte()
+		switch stat {
+		case 1:
+			id, r := x.readRecord()
+			fmt.Println("1record:",id,r)
+		case 2:
+			id, r := x.readRecord()
+			fmt.Println("2record:",id,r)
+		case 0:
+			return
+		default:
+			return
+		}
+	}
+
 }
