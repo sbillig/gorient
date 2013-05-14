@@ -77,18 +77,26 @@ type Xx struct {
 }
 
 func (x *Xx) read(data interface{}) {
-	binary.Read(x.conn, binary.BigEndian, data)
+	err := binary.Read(x.conn, binary.BigEndian, data)
+	if err != nil { panic(err) }
 }
 
 func (x *Xx) write(data ...interface{}) {
+	var err error
 	for _, d := range data {
 		switch d.(type) {
 		case string:
 			b := []byte(d.(string))
-			binary.Write(x.conn, binary.BigEndian, int32(len(b)))
-			binary.Write(x.conn, binary.BigEndian, &b)
+			err = binary.Write(x.conn, binary.BigEndian, int32(len(b)))
+			if err != nil {
+				panic(err)
+			}
+			err = binary.Write(x.conn, binary.BigEndian, &b)
 		default:
-			binary.Write(x.conn, binary.BigEndian, d)
+			err = binary.Write(x.conn, binary.BigEndian, d)
+		}
+		if err != nil {
+			panic(err)
 		}
 	}
 }
@@ -204,9 +212,9 @@ func (x *Xx) open(host, db, user, pass string) error {
 	return nil
 }
 
-func (x *Xx) close() {
+func (x *Xx) close() error {
 	// TODO: DB_CLOSE
-	x.conn.Close()
+	return x.conn.Close()
 }
 
 func (x *Xx) size() int64 {
